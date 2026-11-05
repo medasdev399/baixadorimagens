@@ -121,14 +121,22 @@ jobs:
           path: dist/BaixadorImagens-Web.zip
 
   release:
-    name: Criar GitHub Release (em tags v*)
+    name: Criar/Atualizar GitHub Release
     needs: [build-linux, build-windows, build-web]
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Ler versão do pubspec.yaml
+        id: get_version
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed -E 's/version:[[:space:]]*([^+[:space:]]+).*/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Baixar Artifacts gerados
         uses: actions/download-artifact@v4
         with:
@@ -137,6 +145,8 @@ jobs:
       - name: Publicar na aba Releases do GitHub
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: Baixador de Imagens v${{ steps.get_version.outputs.version }}
           files: |
             artifacts/**/*
           generate_release_notes: true
