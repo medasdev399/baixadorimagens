@@ -4,7 +4,7 @@
 #define MyAppExeName "baixadorimagens.exe"
 
 [Setup]
-AppId={{8F9C3A4E-5B7D-4E2A-9C1F-6D8B4E3A2F10}
+AppId={8F9C3A4E-5B7D-4E2A-9C1F-6D8B4E3A2F10}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
