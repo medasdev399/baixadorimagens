@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+
+import 'app_logger.dart';
 
 enum DownloadStatus { idle, downloading, completed, error }
 
@@ -24,6 +27,7 @@ class DownloadItem {
 
 class DownloaderEngine {
   final Dio _dio;
+  final AppLogger _logger;
   bool _isCancelled = false;
   CancelToken? _cancelToken;
 
@@ -36,7 +40,7 @@ class DownloaderEngine {
     'image/avif': '.avif',
   };
 
-  DownloaderEngine({Dio? dio})
+  DownloaderEngine({Dio? dio, AppLogger? logger})
     : _dio =
           dio ??
           Dio(
@@ -45,10 +49,12 @@ class DownloaderEngine {
               receiveTimeout: const Duration(seconds: 30),
               followRedirects: true,
             ),
-          );
+          ),
+      _logger = logger ?? AppLogger.instance;
 
   void cancelar() {
     _isCancelled = true;
+    _logger.warning('Cancelamento da fila solicitado pelo usuário.');
     final token = _cancelToken;
     if (token != null && !token.isCancelled) {
       token.cancel('Download cancelado pelo usuário.');
@@ -68,6 +74,7 @@ class DownloaderEngine {
     final dir = Directory(outputPath);
     if (!await dir.exists()) {
       await dir.create(recursive: true);
+      _logger.info('Diretório de destino criado', details: dir.path);
     }
 
     final itensParaBaixar = queue.where((item) {
@@ -75,10 +82,19 @@ class DownloaderEngine {
       return item.status != DownloadStatus.completed;
     }).toList();
 
-    if (itensParaBaixar.isEmpty) return;
+    if (itensParaBaixar.isEmpty) {
+      _logger.info('Nenhum item pendente para download na fila.');
+      return;
+    }
 
     int cursor = 0;
     final workerCount = maxConcurrency.clamp(1, itensParaBaixar.length);
+
+    _logger.info(
+      'Iniciando fila de downloads',
+      details:
+          'Pendentes: ${itensParaBaixar.length}/${queue.length} | Concorrência: $workerCount | Destino: ${dir.path} | Apenas erros: $apenasErros',
+    );
 
     Future<void> worker() async {
       while (cursor < itensParaBaixar.length && !_isCancelled) {
@@ -88,6 +104,17 @@ class DownloaderEngine {
     }
 
     await Future.wait(List.generate(workerCount, (_) => worker()));
+
+    final concluidos = queue
+        .where((e) => e.status == DownloadStatus.completed)
+        .length;
+    final erros = queue.where((e) => e.status == DownloadStatus.error).length;
+    _logger.info(
+      _isCancelled
+          ? 'Execução da fila interrompida'
+          : 'Execução da fila finalizada',
+      details: 'Concluídos: $concluidos/${queue.length} | Falhas: $erros',
+    );
   }
 
   Future<void> _processarItem(
@@ -125,7 +152,8 @@ class DownloaderEngine {
           options: Options(
             responseType: ResponseType.bytes,
             headers: {
-              'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',
+              'User-Agent':
+                  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',
               'Referer': referer,
               'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
             },
@@ -161,6 +189,8 @@ class DownloaderEngine {
         String rawName = uri.pathSegments.isNotEmpty
             ? uri.pathSegments.last
             : 'img';
+        rawName = _extrairNomeSeBase64Json(rawName);
+
         if (rawName.contains('.')) {
           final parts = rawName.split('.');
           if (ext.isEmpty) ext = '.${parts.last.toLowerCase()}';
@@ -169,7 +199,10 @@ class DownloaderEngine {
         if (ext.isEmpty) ext = '.jpg';
 
         final cleanName = rawName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '');
-        final safeName = cleanName.isEmpty ? 'img' : cleanName;
+        String safeName = cleanName.isEmpty ? 'img' : cleanName;
+        if (safeName.length > 60) {
+          safeName = safeName.substring(0, 60);
+        }
         final fileName =
             '${item.index.toString().padLeft(4, '0')}_$safeName$ext';
 
@@ -180,6 +213,13 @@ class DownloaderEngine {
         item.progress = 1.0;
         item.status = DownloadStatus.completed;
         onUpdate(item);
+
+        final tamanhoKb = (bytes.length / 1024).toStringAsFixed(1);
+        _logger.info(
+          'Item #${item.index} baixado com sucesso',
+          details:
+              'Arquivo: $fileName ($tamanhoKb KB) | Tipo: ${contentType.isEmpty ? "desconhecido" : contentType} | URL: ${item.url}',
+        );
         return;
       } catch (e) {
         if (_isCancelled || (e is DioException && CancelToken.isCancel(e))) {
@@ -187,34 +227,78 @@ class DownloaderEngine {
           return;
         }
 
-        // Erros de formato de URL não precisam de novas tentativas
-        if (e is FormatException) {
+        final descricaoErro = _descreverErro(e);
+
+        // Erros de formato de URL ou sistema de arquivos não precisam de novas tentativas de rede
+        if (e is FormatException || e is FileSystemException) {
           item.status = DownloadStatus.error;
-          item.errorMessage = e.message;
+          item.errorMessage = descricaoErro;
           onUpdate(item);
+          _logger.error(
+            'Erro não recuperável no item #${item.index}',
+            details: 'URL: ${item.url} | Motivo: $descricaoErro',
+          );
           return;
         }
 
         if (tentativa < 3) {
+          final esperaSegundos = tentativa * 2;
+          _logger.warning(
+            'Tentativa $tentativa/3 falhou no item #${item.index} (nova tentativa em ${esperaSegundos}s)',
+            details: 'URL: ${item.url} | Erro: $descricaoErro',
+          );
           final token = _cancelToken;
           if (token != null) {
             await Future.any([
-              Future.delayed(Duration(seconds: tentativa * 2)),
-              // ignore: invalid_return_type_for_catch_error
-              token.whenCancel.catchError(
-                (_) => Response(requestOptions: RequestOptions()),
-              ),
+              Future.delayed(Duration(seconds: esperaSegundos)),
+              token.whenCancel.then<void>((_) {}, onError: (_) {}),
             ]);
           } else {
-            await Future.delayed(Duration(seconds: tentativa * 2));
+            await Future.delayed(Duration(seconds: esperaSegundos));
           }
         } else {
           item.status = DownloadStatus.error;
-          item.errorMessage = e.toString();
+          item.errorMessage = descricaoErro;
           onUpdate(item);
+          _logger.error(
+            'Falha definitiva no item #${item.index} após 3 tentativas',
+            details: 'URL: ${item.url} | Erro: $descricaoErro',
+          );
         }
       }
     }
+  }
+
+  String _extrairNomeSeBase64Json(String segment) {
+    if (!segment.startsWith('eyJ')) return segment;
+    try {
+      final normalized = base64Url.normalize(
+        segment.replaceAll('-', '+').replaceAll('_', '/'),
+      );
+      final decoded = utf8.decode(base64.decode(normalized));
+      final dynamic jsonMap = jsonDecode(decoded);
+      if (jsonMap is Map && jsonMap['key'] is String) {
+        final keyPath = jsonMap['key'] as String;
+        final parts = keyPath.split('/');
+        if (parts.isNotEmpty && parts.last.trim().isNotEmpty) {
+          return parts.last.trim();
+        }
+      }
+    } catch (_) {
+      // Caso não seja um JSON Base64 válido, mantém o segmento original
+    }
+    return segment;
+  }
+
+  String _descreverErro(Object e) {
+    if (e is DioException) {
+      final status = e.response?.statusCode;
+      if (status != null) {
+        return 'HTTP $status (${e.response?.statusMessage ?? e.type.name})';
+      }
+      return '${e.type.name}: ${e.message ?? "Falha de conexão"}';
+    }
+    return e.toString();
   }
 
   void _resetarItemCancelado(

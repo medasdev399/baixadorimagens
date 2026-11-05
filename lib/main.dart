@@ -1,11 +1,39 @@
 import 'dart:io';
+import 'dart:ui';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 
+import 'services/app_logger.dart';
 import 'services/downloader_engine.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final logger = AppLogger.instance;
+  await logger.initFileLogging();
+
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    logger.error(
+      'Erro de interface do Flutter',
+      error: details.exception,
+      stackTrace: details.stack,
+      details: details.context?.toDescription(),
+    );
+  };
+
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    logger.error(
+      'Exceção assíncrona não tratada',
+      error: error,
+      stackTrace: stack,
+    );
+    return true;
+  };
+
   runApp(const BaixadorImagensApp());
 }
 
@@ -42,6 +70,7 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
   );
 
   final DownloaderEngine _engine = DownloaderEngine();
+  final AppLogger _logger = AppLogger.instance;
 
   List<DownloadItem> _queue = [];
   bool _isRunning = false;
@@ -84,6 +113,10 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
       setState(() {
         _dirController.text = selectedDirectory;
       });
+      _logger.info(
+        'Pasta de destino selecionada pelo usuário',
+        details: selectedDirectory,
+      );
     }
   }
 
@@ -136,6 +169,12 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
         apenasErros: apenasErros,
         onUpdate: (_) => _agendarAtualizacaoUI(),
       );
+    } catch (e, stack) {
+      _logger.error(
+        'Erro inesperado ao executar a fila de downloads',
+        error: e,
+        stackTrace: stack,
+      );
     } finally {
       if (mounted) {
         setState(() => _isRunning = false);
@@ -145,6 +184,16 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
 
   void _pararDownloads() {
     _engine.cancelar();
+  }
+
+  void _abrirVisualizadorLogs() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => LogViewerDialog(
+        logger: _logger,
+        outputDirectory: _dirController.text.trim(),
+      ),
+    );
   }
 
   @override
@@ -160,7 +209,7 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
         centerTitle: false,
         actions: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Center(
               child: Text(
                 'Concluídos: $concluidos / ${_queue.length}  |  Falhas: $erros',
@@ -168,6 +217,12 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
               ),
             ),
           ),
+          IconButton(
+            onPressed: _abrirVisualizadorLogs,
+            icon: const Icon(Icons.receipt_long),
+            tooltip: 'Visualizar Logs da Aplicação',
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Row(
@@ -334,5 +389,224 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
       case DownloadStatus.error:
         return const Icon(Icons.error_outline, color: Colors.redAccent);
     }
+  }
+}
+
+class LogViewerDialog extends StatefulWidget {
+  final AppLogger logger;
+  final String outputDirectory;
+
+  const LogViewerDialog({
+    super.key,
+    required this.logger,
+    required this.outputDirectory,
+  });
+
+  @override
+  State<LogViewerDialog> createState() => _LogViewerDialogState();
+}
+
+class _LogViewerDialogState extends State<LogViewerDialog> {
+  LogLevel? _filtroNivel;
+
+  Future<void> _copiarLogs() async {
+    final texto = widget.logger.gerarRelatorioTexto(filtroNivel: _filtroNivel);
+    await Clipboard.setData(ClipboardData(text: texto));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Logs copiados para a área de transferência.'),
+      ),
+    );
+  }
+
+  Future<void> _exportarLogs() async {
+    try {
+      final arquivo = await widget.logger.exportarParaPasta(
+        widget.outputDirectory,
+        filtroNivel: _filtroNivel,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Log exportado em: ${arquivo.path}'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Falha ao exportar log: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  Color _corNivel(LogLevel level) {
+    switch (level) {
+      case LogLevel.info:
+        return Colors.tealAccent;
+      case LogLevel.warning:
+        return Colors.amberAccent;
+      case LogLevel.error:
+        return Colors.redAccent;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.all(24),
+      child: SizedBox(
+        width: 860,
+        height: 540,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: ListenableBuilder(
+            listenable: widget.logger,
+            builder: (context, _) {
+              final todas = widget.logger.entries;
+              final filtradas = _filtroNivel == null
+                  ? todas
+                  : todas.where((e) => e.level == _filtroNivel).toList();
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.receipt_long),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Logs da Aplicação',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      SegmentedButton<LogLevel?>(
+                        segments: const [
+                          ButtonSegment(value: null, label: Text('Todos')),
+                          ButtonSegment(
+                            value: LogLevel.error,
+                            label: Text('Erros'),
+                          ),
+                          ButtonSegment(
+                            value: LogLevel.warning,
+                            label: Text('Avisos'),
+                          ),
+                          ButtonSegment(
+                            value: LogLevel.info,
+                            label: Text('Info'),
+                          ),
+                        ],
+                        selected: {_filtroNivel},
+                        onSelectionChanged: (selecao) {
+                          setState(() => _filtroNivel = selecao.first);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close),
+                        tooltip: 'Fechar',
+                      ),
+                    ],
+                  ),
+                  if (widget.logger.logFilePath != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Arquivo persistente: ${widget.logger.logFilePath}',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                  const Divider(height: 16),
+                  Expanded(
+                    child: filtradas.isEmpty
+                        ? const Center(
+                            child: Text('Nenhum registro encontrado.'),
+                          )
+                        : ListView.separated(
+                            itemCount: filtradas.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              // Exibe os mais recentes no topo
+                              final entry =
+                                  filtradas[filtradas.length - 1 - index];
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 6.0,
+                                  horizontal: 4.0,
+                                ),
+                                child: SelectableText.rich(
+                                  TextSpan(
+                                    style: const TextStyle(
+                                      fontFamily: 'monospace',
+                                      fontSize: 12.5,
+                                    ),
+                                    children: [
+                                      TextSpan(
+                                        text: '[${entry.formattedTimestamp}] ',
+                                        style: const TextStyle(
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                      TextSpan(
+                                        text: '[${entry.levelLabel}] ',
+                                        style: TextStyle(
+                                          color: _corNivel(entry.level),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      TextSpan(text: entry.message),
+                                      if (entry.details != null &&
+                                          entry.details!.isNotEmpty)
+                                        TextSpan(
+                                          text: '\n  ↳ ${entry.details}',
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  const Divider(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton.icon(
+                        onPressed: todas.isEmpty ? null : widget.logger.limpar,
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Limpar Memória'),
+                      ),
+                      const Spacer(),
+                      OutlinedButton.icon(
+                        onPressed: filtradas.isEmpty ? null : _copiarLogs,
+                        icon: const Icon(Icons.copy),
+                        label: const Text('Copiar'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        onPressed: filtradas.isEmpty ? null : _exportarLogs,
+                        icon: const Icon(Icons.save_alt),
+                        label: const Text('Exportar .log'),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
   }
 }
