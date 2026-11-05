@@ -1,0 +1,12 @@
+{
+    "name": "Baixador de Imagens",
+    "short_name": "BaixadorImagens",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#121212",
+    "theme_color": "#64FFDA",
+    "description": "Aplicativo para download automatizado de imagens em lote por Gabriel Moreno (MedasDev).",
+    "orientation": "any",
+    "prefer_related_applications": false
+}
+

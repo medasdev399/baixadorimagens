@@ -13,7 +13,7 @@ void main() {
     await tester.pumpWidget(const BaixadorImagensApp());
 
     expect(find.text('Baixador de Imagens'), findsOneWidget);
-    expect(find.text('Cole as URLs ao lado para montar a fila.'), findsOneWidget);
+    expect(find.text('Cole as URLs para montar a fila.'), findsOneWidget);
 
     final urlField = find.byType(TextField).first;
     await tester.enterText(

@@ -1,4 +1,4 @@
-name: Build Installers (Linux & Windows)
+name: Build (Linux, Windows & Web)
 
 on:
   workflow_dispatch:
@@ -89,9 +89,40 @@ jobs:
             dist/BaixadorImagens-Windows-Setup.exe
             dist/BaixadorImagens-Windows-x64-Portable.zip
 
+  build-web:
+    name: Build Web (Navegador)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Instalar pacotes Dart/Flutter
+        run: flutter pub get
+
+      - name: Compilar aplicativo para Web (Release)
+        run: flutter build web --release
+
+      - name: Empacotar build Web (.zip)
+        run: |
+          mkdir -p dist
+          cd build/web && zip -r ../../dist/BaixadorImagens-Web.zip .
+
+      - name: Publicar build Web como Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BaixadorImagens-Web
+          path: dist/BaixadorImagens-Web.zip
+
   release:
     name: Criar GitHub Release (em tags v*)
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-web]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

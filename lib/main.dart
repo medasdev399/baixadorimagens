@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
@@ -8,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import 'services/app_logger.dart';
 import 'services/downloader_engine.dart';
+import 'services/platform_storage.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -66,7 +66,7 @@ class DownloaderScreen extends StatefulWidget {
 class _DownloaderScreenState extends State<DownloaderScreen> {
   final TextEditingController _urlsController = TextEditingController();
   late final TextEditingController _dirController = TextEditingController(
-    text: _defaultDownloadDir(),
+    text: PlatformStorage.defaultDownloadDir,
   );
 
   final DownloaderEngine _engine = DownloaderEngine();
@@ -76,14 +76,6 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
   bool _isRunning = false;
   bool _updateScheduled = false;
   int _maxConcurrency = 8;
-
-  static String _defaultDownloadDir() {
-    final home = Platform.environment['HOME'] ??
-        Platform.environment['USERPROFILE'] ??
-        '.';
-    final sep = Platform.pathSeparator;
-    return '$home${sep}Downloads${sep}baixadorimagens';
-  }
 
   @override
   void dispose() {
@@ -217,7 +209,7 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
             ),
             const SizedBox(height: 4),
             const Text(
-              'Aplicativo desktop para download automatizado de imagens em lote.',
+              'Aplicativo multiplataforma (Desktop & Web) para download automatizado de imagens em lote.',
             ),
             const Divider(height: 24),
             const Text(
@@ -297,152 +289,172 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Row(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 750;
+          final painelControle = _buildPainelControle(erros);
+          final painelFila = _buildPainelFila(progressoGeral);
+
+          if (isWide) {
+            return Row(
+              children: [
+                Expanded(flex: 2, child: painelControle),
+                const VerticalDivider(width: 1),
+                Expanded(flex: 3, child: painelFila),
+              ],
+            );
+          }
+
+          return Column(
+            children: [
+              Expanded(flex: 1, child: painelControle),
+              const Divider(height: 1),
+              Expanded(flex: 1, child: painelFila),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPainelControle(int erros) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const Text(
+            'Lista de URLs (uma por linha):',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
           Expanded(
-            flex: 2,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'Lista de URLs (uma por linha):',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: _urlsController,
-                      enabled: !_isRunning,
-                      maxLines: null,
-                      expands: true,
-                      textAlignVertical: TextAlignVertical.top,
-                      decoration: const InputDecoration(
-                        hintText:
-                            'https://site1.com/foto.jpg\nhttps://site2.com/imagem.png',
-                        border: OutlineInputBorder(),
-                      ),
-                      onChanged: (_) {
-                        if (!_isRunning) _carregarFila();
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _dirController,
-                          enabled: !_isRunning,
-                          decoration: const InputDecoration(
-                            labelText: 'Pasta de Destino',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton.filledTonal(
-                        onPressed: _isRunning ? null : _selecionarPasta,
-                        icon: const Icon(Icons.folder_open),
-                        tooltip: 'Escolher pasta',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Text('Downloads simultâneos:'),
-                      Expanded(
-                        child: Slider(
-                          value: _maxConcurrency.toDouble(),
-                          min: 1,
-                          max: 20,
-                          divisions: 19,
-                          label: '$_maxConcurrency',
-                          onChanged: _isRunning
-                              ? null
-                              : (val) =>
-                                  setState(() => _maxConcurrency = val.toInt()),
-                        ),
-                      ),
-                      Text('$_maxConcurrency'),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _isRunning
-                              ? _pararDownloads
-                              : () => _iniciarDownloads(),
-                          icon: Icon(_isRunning ? Icons.stop : Icons.download),
-                          label: Text(_isRunning ? 'Parar' : 'Baixar Tudo'),
-                        ),
-                      ),
-                      if (erros > 0 && !_isRunning) ...[
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: () =>
-                              _iniciarDownloads(apenasErros: true),
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Tentar Erros'),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
+            child: TextField(
+              controller: _urlsController,
+              enabled: !_isRunning,
+              maxLines: null,
+              expands: true,
+              textAlignVertical: TextAlignVertical.top,
+              decoration: const InputDecoration(
+                hintText:
+                    'https://site1.com/foto.jpg\nhttps://site2.com/imagem.png',
+                border: OutlineInputBorder(),
               ),
+              onChanged: (_) {
+                if (!_isRunning) _carregarFila();
+              },
             ),
           ),
-          const VerticalDivider(width: 1),
-          Expanded(
-            flex: 3,
-            child: Column(
-              children: [
-                LinearProgressIndicator(value: progressoGeral, minHeight: 6),
-                Expanded(
-                  child: _queue.isEmpty
-                      ? const Center(
-                          child:
-                              Text('Cole as URLs ao lado para montar a fila.'),
-                        )
-                      : ListView.separated(
-                          itemCount: _queue.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final item = _queue[index];
-                            return ListTile(
-                              dense: true,
-                              leading: _buildStatusIcon(item.status),
-                              title: Text(
-                                item.savedFileName ?? item.url,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: item.status == DownloadStatus.error
-                                  ? Text(
-                                      item.errorMessage ?? 'Erro desconhecido',
-                                      style: const TextStyle(
-                                          color: Colors.redAccent),
-                                      maxLines: 1,
-                                    )
-                                  : item.status == DownloadStatus.downloading
-                                      ? LinearProgressIndicator(
-                                          value: item.progress)
-                                      : null,
-                              trailing: Text('#${item.index}'),
-                            );
-                          },
-                        ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _dirController,
+                  enabled: !_isRunning && !PlatformStorage.isWeb,
+                  readOnly: PlatformStorage.isWeb,
+                  decoration: InputDecoration(
+                    labelText: PlatformStorage.isWeb
+                        ? 'Destino no Navegador'
+                        : 'Pasta de Destino',
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              if (!PlatformStorage.isWeb) ...[
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: _isRunning ? null : _selecionarPasta,
+                  icon: const Icon(Icons.folder_open),
+                  tooltip: 'Escolher pasta',
                 ),
               ],
-            ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Text('Downloads simultâneos:'),
+              Expanded(
+                child: Slider(
+                  value: _maxConcurrency.toDouble(),
+                  min: 1,
+                  max: 20,
+                  divisions: 19,
+                  label: '$_maxConcurrency',
+                  onChanged: _isRunning
+                      ? null
+                      : (val) => setState(() => _maxConcurrency = val.toInt()),
+                ),
+              ),
+              Text('$_maxConcurrency'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _isRunning
+                      ? _pararDownloads
+                      : () => _iniciarDownloads(),
+                  icon: Icon(_isRunning ? Icons.stop : Icons.download),
+                  label: Text(_isRunning ? 'Parar' : 'Baixar Tudo'),
+                ),
+              ),
+              if (erros > 0 && !_isRunning) ...[
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _iniciarDownloads(apenasErros: true),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Tentar Erros'),
+                ),
+              ],
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildPainelFila(double progressoGeral) {
+    return Column(
+      children: [
+        LinearProgressIndicator(value: progressoGeral, minHeight: 6),
+        Expanded(
+          child: _queue.isEmpty
+              ? const Center(
+                  child: Text('Cole as URLs para montar a fila.'),
+                )
+              : ListView.separated(
+                  itemCount: _queue.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final item = _queue[index];
+                    return ListTile(
+                      dense: true,
+                      leading: _buildStatusIcon(item.status),
+                      title: Text(
+                        item.savedFileName ?? item.url,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: item.status == DownloadStatus.error
+                          ? Text(
+                              item.errorMessage ?? 'Erro desconhecido',
+                              style: const TextStyle(color: Colors.redAccent),
+                              maxLines: 1,
+                            )
+                          : item.status == DownloadStatus.downloading
+                              ? LinearProgressIndicator(value: item.progress)
+                              : null,
+                      trailing: Text('#${item.index}'),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
@@ -494,14 +506,14 @@ class _LogViewerDialogState extends State<LogViewerDialog> {
 
   Future<void> _exportarLogs() async {
     try {
-      final arquivo = await widget.logger.exportarParaPasta(
+      final destino = await widget.logger.exportarParaPasta(
         widget.outputDirectory,
         filtroNivel: _filtroNivel,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Log exportado em: ${arquivo.path}'),
+          content: Text('Log exportado em: $destino'),
         ),
       );
     } catch (e) {

@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dio/dio.dart';
 
 import 'app_logger.dart';
+import 'platform_storage.dart';
 
 enum DownloadStatus { idle, downloading, completed, error }
 
@@ -71,10 +71,9 @@ class DownloaderEngine {
     _isCancelled = false;
     _cancelToken = CancelToken();
 
-    final dir = Directory(outputPath);
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-      _logger.info('Diretório de destino criado', details: dir.path);
+    final created = await PlatformStorage.ensureDirectory(outputPath);
+    if (created) {
+      _logger.info('Diretório de destino criado', details: outputPath);
     }
 
     final itensParaBaixar = queue.where((item) {
@@ -93,13 +92,13 @@ class DownloaderEngine {
     _logger.info(
       'Iniciando fila de downloads',
       details:
-          'Pendentes: ${itensParaBaixar.length}/${queue.length} | Concorrência: $workerCount | Destino: ${dir.path} | Apenas erros: $apenasErros',
+          'Pendentes: ${itensParaBaixar.length}/${queue.length} | Concorrência: $workerCount | Destino: $outputPath | Apenas erros: $apenasErros',
     );
 
     Future<void> worker() async {
       while (cursor < itensParaBaixar.length && !_isCancelled) {
         final item = itensParaBaixar[cursor++];
-        await _processarItem(item, dir.path, onUpdate);
+        await _processarItem(item, outputPath, onUpdate);
       }
     }
 
@@ -146,24 +145,10 @@ class DownloaderEngine {
 
         final referer = '${uri.scheme}://${uri.host}/';
 
-        final response = await _dio.get<List<int>>(
-          item.url,
-          cancelToken: _cancelToken,
-          options: Options(
-            responseType: ResponseType.bytes,
-            headers: {
-              'User-Agent':
-                  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',
-              'Referer': referer,
-              'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-            },
-          ),
-          onReceiveProgress: (received, total) {
-            if (total > 0 && !_isCancelled) {
-              item.progress = received / total;
-              onUpdate(item);
-            }
-          },
+        final response = await _baixarBytesComSuporteWeb(
+          item: item,
+          referer: referer,
+          onUpdate: onUpdate,
         );
 
         if (_isCancelled) {
@@ -206,8 +191,11 @@ class DownloaderEngine {
         final fileName =
             '${item.index.toString().padLeft(4, '0')}_$safeName$ext';
 
-        final file = File('$outputPath${Platform.pathSeparator}$fileName');
-        await file.writeAsBytes(bytes);
+        await PlatformStorage.saveImageBytes(
+          outputPath: outputPath,
+          fileName: fileName,
+          bytes: bytes,
+        );
 
         item.savedFileName = fileName;
         item.progress = 1.0;
@@ -230,7 +218,8 @@ class DownloaderEngine {
         final descricaoErro = _descreverErro(e);
 
         // Erros de formato de URL ou sistema de arquivos não precisam de novas tentativas de rede
-        if (e is FormatException || e is FileSystemException) {
+        if (e is FormatException ||
+            PlatformStorage.isUnrecoverableStorageError(e)) {
           item.status = DownloadStatus.error;
           item.errorMessage = descricaoErro;
           onUpdate(item);
@@ -266,6 +255,60 @@ class DownloaderEngine {
           );
         }
       }
+    }
+  }
+
+  Future<Response<List<int>>> _baixarBytesComSuporteWeb({
+    required DownloadItem item,
+    required String referer,
+    required void Function(DownloadItem item) onUpdate,
+  }) async {
+    final headers = <String, dynamic>{
+      'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      if (!PlatformStorage.isWeb) ...{
+        'User-Agent':
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',
+        'Referer': referer,
+      },
+    };
+
+    try {
+      return await _dio.get<List<int>>(
+        item.url,
+        cancelToken: _cancelToken,
+        options: Options(responseType: ResponseType.bytes, headers: headers),
+        onReceiveProgress: (received, total) {
+          if (total > 0 && !_isCancelled) {
+            item.progress = received / total;
+            onUpdate(item);
+          }
+        },
+      );
+    } on DioException catch (e) {
+      // Na Web, se o servidor remoto bloquear CORS diretamente no navegador,
+      // tenta buscar automaticamente via proxy CORS.
+      if (PlatformStorage.isWeb &&
+          e.type == DioExceptionType.connectionError &&
+          !CancelToken.isCancel(e)) {
+        final proxyUrl =
+            'https://corsproxy.io/?${Uri.encodeComponent(item.url)}';
+        _logger.info(
+          'Usando fallback de proxy CORS no navegador para o item #${item.index}',
+          details: item.url,
+        );
+        return await _dio.get<List<int>>(
+          proxyUrl,
+          cancelToken: _cancelToken,
+          options: Options(responseType: ResponseType.bytes, headers: headers),
+          onReceiveProgress: (received, total) {
+            if (total > 0 && !_isCancelled) {
+              item.progress = received / total;
+              onUpdate(item);
+            }
+          },
+        );
+      }
+      rethrow;
     }
   }
 

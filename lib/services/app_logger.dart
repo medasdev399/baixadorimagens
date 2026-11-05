@@ -1,5 +1,6 @@
-import 'dart:io';
 import 'package:flutter/foundation.dart';
+
+import 'platform_storage.dart';
 
 enum LogLevel { info, warning, error }
 
@@ -54,45 +55,23 @@ class AppLogger extends ChangeNotifier {
 
   static const int _maxEntries = 2000;
   final List<LogEntry> _entries = [];
-  File? _logFile;
+  String? _logFilePath;
   bool _fileInitialized = false;
 
   List<LogEntry> get entries => List.unmodifiable(_entries);
 
-  String? get logFilePath => _logFile?.path;
+  String? get logFilePath => _logFilePath;
 
   Future<void> initFileLogging() async {
     if (_fileInitialized) return;
     _fileInitialized = true;
-    try {
-      final logDir = Directory(_defaultLogDirPath());
-      if (!await logDir.exists()) {
-        await logDir.create(recursive: true);
-      }
-      final sep = Platform.pathSeparator;
-      _logFile = File('${logDir.path}${sep}app.log');
-      info(
-        'Sistema de log inicializado',
-        details:
-            'OS: ${Platform.operatingSystem} (${Platform.operatingSystemVersion}) | Arquivo: ${_logFile!.path}',
-      );
-    } catch (_) {
-      // Se não for possível criar o arquivo (ex.: ambiente de teste restrito),
-      // mantém os logs funcionando em memória sem interromper o aplicativo.
-      _logFile = null;
-    }
-  }
-
-  static String _defaultLogDirPath() {
-    final sep = Platform.pathSeparator;
-    if (Platform.isWindows) {
-      final localAppData = Platform.environment['LOCALAPPDATA'] ??
-          Platform.environment['USERPROFILE'] ??
-          '.';
-      return '$localAppData${sep}baixadorimagens${sep}logs';
-    }
-    final home = Platform.environment['HOME'] ?? '.';
-    return '$home$sep.local${sep}share${sep}baixadorimagens${sep}logs';
+    _logFilePath = await PlatformStorage.initPersistentLogFile();
+    info(
+      'Sistema de log inicializado',
+      details: _logFilePath != null
+          ? 'Sistema: ${PlatformStorage.systemInfo} | Arquivo: $_logFilePath'
+          : 'Sistema: ${PlatformStorage.systemInfo} | Modo em memória (Web)',
+    );
   }
 
   void info(String message, {String? details}) {
@@ -141,22 +120,11 @@ class AppLogger extends ChangeNotifier {
     }
     _entries.add(entry);
 
-    _gravarEmArquivoAsync(entry);
-    notifyListeners();
-  }
-
-  void _gravarEmArquivoAsync(LogEntry entry) {
-    final file = _logFile;
-    if (file == null) return;
-    try {
-      file.writeAsStringSync(
-        '${entry.format()}\n',
-        mode: FileMode.append,
-        flush: false,
-      );
-    } catch (_) {
-      // Ignora falhas de I/O secundárias para não afetar o fluxo principal
+    final path = _logFilePath;
+    if (path != null) {
+      PlatformStorage.appendLogLine(path, entry.format());
     }
+    notifyListeners();
   }
 
   void limpar() {
@@ -169,11 +137,9 @@ class AppLogger extends ChangeNotifier {
     buffer.writeln('=== RELATÓRIO DE LOGS - BAIXADOR DE IMAGENS ===');
     buffer.writeln('Desenvolvedor: Gabriel Moreno (MedasDev) <gabrielmm399@gmail.com>');
     buffer.writeln('Gerado em: ${DateTime.now().toIso8601String()}');
-    buffer.writeln(
-      'Sistema: ${Platform.operatingSystem} - ${Platform.operatingSystemVersion}',
-    );
-    if (_logFile != null) {
-      buffer.writeln('Arquivo de log: ${_logFile!.path}');
+    buffer.writeln('Sistema: ${PlatformStorage.systemInfo}');
+    if (_logFilePath != null) {
+      buffer.writeln('Arquivo de log: $_logFilePath');
     }
     buffer.writeln('===============================================');
     buffer.writeln();
@@ -188,22 +154,20 @@ class AppLogger extends ChangeNotifier {
     return buffer.toString();
   }
 
-  Future<File> exportarParaPasta(
+  Future<String> exportarParaPasta(
     String directoryPath, {
     LogLevel? filtroNivel,
   }) async {
-    final dir = Directory(directoryPath);
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
     final now = DateTime.now();
     final stamp =
         '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
         '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
-    final sep = Platform.pathSeparator;
-    final file = File('${dir.path}${sep}baixadorimagens_log_$stamp.log');
-    await file.writeAsString(gerarRelatorioTexto(filtroNivel: filtroNivel));
-    return file;
+    final fileName = 'baixadorimagens_log_$stamp.log';
+    return PlatformStorage.exportLogFile(
+      outputPath: directoryPath,
+      fileName: fileName,
+      content: gerarRelatorioTexto(filtroNivel: filtroNivel),
+    );
   }
 }
 
