@@ -13,6 +13,7 @@ Aplicativo desktop multiplataforma (Linux e Windows) desenvolvido em Flutter par
 5. [Funcionamento Interno do Motor de Download](#5-funcionamento-interno-do-motor-de-download)
 6. [Requisitos de Desenvolvimento](#6-requisitos-de-desenvolvimento)
 7. [Compilação e Geração de Instaladores](#7-compilação-e-geração-de-instaladores)
+8. [Desenvolvedor](#8-desenvolvedor)
 
 ---
 
@@ -191,3 +192,11 @@ O projeto possui um pipeline configurado em `.github/workflows/build_installers.
 - **Windows**:
   - `BaixadorImagens-Windows-Setup.exe` (Instalador padrão Windows em Português gerado pelo Inno Setup, com suporte a atalhos e desinstalador)
   - `BaixadorImagens-Windows-x64-Portable.zip` (Portátil)
+
+---
+
+## 8. Desenvolvedor
+
+- **Nome**: Gabriel Moreno (MedasDev)
+- **E-mail**: gabrielmm399@gmail.com
+

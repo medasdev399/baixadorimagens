@@ -3,7 +3,8 @@ set -euo pipefail
 
 APP_NAME="baixadorimagens"
 APP_DISPLAY_NAME="Baixador de Imagens"
-APP_VERSION="${1:-1.0.0}"
+DEFAULT_VERSION=$(grep '^version:' pubspec.yaml | sed -E 's/version:[[:space:]]*([^+[:space:]]+).*/\1/' || echo "1.0.0")
+APP_VERSION="${1:-$DEFAULT_VERSION}"
 ARCH="amd64"
 
 BUNDLE_DIR="build/linux/x64/release/bundle"
@@ -51,7 +52,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Depends: libgtk-3-0
-Maintainer: MedasDev <dev@example.com>
+Maintainer: Gabriel Moreno (MedasDev) <gabrielmm399@gmail.com>
 Description: $APP_DISPLAY_NAME
  Aplicativo desktop em Flutter para download em lote de imagens.
 EOF

@@ -196,6 +196,73 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
     );
   }
 
+  void _abrirSobre() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.tealAccent),
+            SizedBox(width: 10),
+            Text('Sobre o Aplicativo'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Baixador de Imagens',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Aplicativo desktop para download automatizado de imagens em lote.',
+            ),
+            const Divider(height: 24),
+            const Text(
+              'Desenvolvedor:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SelectableText('Gabriel Moreno (MedasDev)'),
+            const SizedBox(height: 12),
+            const Text(
+              'Contato / Suporte:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SelectableText('gabrielmm399@gmail.com'),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.copy, size: 18),
+                  tooltip: 'Copiar e-mail',
+                  onPressed: () {
+                    Clipboard.setData(
+                      const ClipboardData(text: 'gabrielmm399@gmail.com'),
+                    );
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('E-mail copiado para a área de transferência.'),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Fechar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final concluidos =
@@ -221,6 +288,11 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
             onPressed: _abrirVisualizadorLogs,
             icon: const Icon(Icons.receipt_long),
             tooltip: 'Visualizar Logs da Aplicação',
+          ),
+          IconButton(
+            onPressed: _abrirSobre,
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'Sobre o Desenvolvedor',
           ),
           const SizedBox(width: 8),
         ],

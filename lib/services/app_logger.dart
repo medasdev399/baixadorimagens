@@ -167,6 +167,7 @@ class AppLogger extends ChangeNotifier {
   String gerarRelatorioTexto({LogLevel? filtroNivel}) {
     final buffer = StringBuffer();
     buffer.writeln('=== RELATÓRIO DE LOGS - BAIXADOR DE IMAGENS ===');
+    buffer.writeln('Desenvolvedor: Gabriel Moreno (MedasDev) <gabrielmm399@gmail.com>');
     buffer.writeln('Gerado em: ${DateTime.now().toIso8601String()}');
     buffer.writeln(
       'Sistema: ${Platform.operatingSystem} - ${Platform.operatingSystemVersion}',

@@ -1,6 +1,9 @@
 #define MyAppName "Baixador de Imagens"
-#define MyAppVersion "1.0.0"
-#define MyAppPublisher "BaixadorImagens"
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.0"
+#endif
+#define MyAppPublisher "Gabriel Moreno (MedasDev)"
+#define MyAppContact "gabrielmm399@gmail.com"
 #define MyAppExeName "baixadorimagens.exe"
 
 [Setup]
@@ -8,6 +11,8 @@ AppId={{8F9C3A4E-5B7D-4E2A-9C1F-6D8B4E3A2F10}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppContact={#MyAppContact}
+AppSupportPhone={#MyAppContact}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes

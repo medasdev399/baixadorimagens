@@ -38,7 +38,7 @@ jobs:
       - name: Gerar instalador .deb e arquivo portátil .tar.gz
         run: |
           chmod +x installer/build_linux_deb.sh
-          ./installer/build_linux_deb.sh 1.0.0
+          ./installer/build_linux_deb.sh
 
       - name: Publicar instaladores Linux como Artifact
         uses: actions/upload-artifact@v4
@@ -71,8 +71,10 @@ jobs:
       - name: Gerar instalador Windows (.exe) com Inno Setup
         shell: pwsh
         run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([^\+\s]+)').Matches.Groups[1].Value
+          Write-Host "Gerando instalador Windows para a versao: $version"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          iscc installer/windows_setup.iss
+          iscc "/DMyAppVersion=$version" installer/windows_setup.iss
 
       - name: Gerar versão portátil (.zip)
         shell: pwsh
