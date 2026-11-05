@@ -1,30 +1,26 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:baixadorimagens/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('Renderiza tela principal e monta fila de URLs',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(const BaixadorImagensApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('Baixador de Imagens'), findsOneWidget);
+    expect(find.text('Cole as URLs ao lado para montar a fila.'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+    final urlField = find.byType(TextField).first;
+    await tester.enterText(
+      urlField,
+      'https://site1.com/foto.jpg\nhttps://site2.com/imagem.png',
+    );
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('https://site1.com/foto.jpg'), findsWidgets);
+    expect(find.text('https://site2.com/imagem.png'), findsWidgets);
+    expect(find.text('#1'), findsOneWidget);
+    expect(find.text('#2'), findsOneWidget);
   });
 }

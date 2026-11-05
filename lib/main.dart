@@ -1,8 +1,9 @@
 import 'dart:io';
-import 'dart:typed_data';
-import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+
+import 'services/downloader_engine.dart';
 
 void main() {
   runApp(const BaixadorImagensApp());
@@ -27,24 +28,6 @@ class BaixadorImagensApp extends StatelessWidget {
   }
 }
 
-enum DownloadStatus { idle, downloading, completed, error }
-
-class DownloadItem {
-  final int index;
-  final String url;
-  DownloadStatus status;
-  double progress;
-  String? savedFileName;
-  String? errorMessage;
-
-  DownloadItem({
-    required this.index,
-    required this.url,
-    this.status = DownloadStatus.idle,
-    this.progress = 0.0,
-  });
-}
-
 class DownloaderScreen extends StatefulWidget {
   const DownloaderScreen({super.key});
 
@@ -54,36 +37,50 @@ class DownloaderScreen extends StatefulWidget {
 
 class _DownloaderScreenState extends State<DownloaderScreen> {
   final TextEditingController _urlsController = TextEditingController();
-  final TextEditingController _dirController = TextEditingController(
-    text: '${Platform.environment['HOME'] ?? '.'}/Downloads/baixadorimagens',
+  late final TextEditingController _dirController = TextEditingController(
+    text: _defaultDownloadDir(),
   );
 
-  final Dio _dio = Dio(
-    BaseOptions(
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 30),
-      followRedirects: true,
-    ),
-  );
+  final DownloaderEngine _engine = DownloaderEngine();
 
   List<DownloadItem> _queue = [];
   bool _isRunning = false;
+  bool _updateScheduled = false;
   int _maxConcurrency = 8;
 
-  static const Map<String, String> _mimeToExt = {
-    'image/jpeg': '.jpg',
-    'image/png': '.png',
-    'image/webp': '.webp',
-    'image/gif': '.gif',
-    'image/svg+xml': '.svg',
-    'image/avif': '.avif',
-  };
+  static String _defaultDownloadDir() {
+    final home = Platform.environment['HOME'] ??
+        Platform.environment['USERPROFILE'] ??
+        '.';
+    final sep = Platform.pathSeparator;
+    return '$home${sep}Downloads${sep}baixadorimagens';
+  }
+
+  @override
+  void dispose() {
+    _engine.cancelar();
+    _urlsController.dispose();
+    _dirController.dispose();
+    super.dispose();
+  }
+
+  void _agendarAtualizacaoUI() {
+    if (!mounted || _updateScheduled) return;
+    _updateScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _updateScheduled = false;
+      if (mounted) {
+        setState(() {});
+      }
+    });
+    SchedulerBinding.instance.scheduleFrame();
+  }
 
   Future<void> _selecionarPasta() async {
-    String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
+    String? selectedDirectory = await FilePicker.getDirectoryPath(
       dialogTitle: 'Selecione a pasta para salvar as imagens',
     );
-    if (selectedDirectory != null) {
+    if (selectedDirectory != null && mounted) {
       setState(() {
         _dirController.text = selectedDirectory;
       });
@@ -97,11 +94,29 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
         .where((e) => e.isNotEmpty && e.startsWith('http'))
         .toList();
 
+    // Preserva itens já existentes na fila (ex.: downloads já concluídos ou com erro)
+    final Map<String, List<DownloadItem>> existentesPorUrl = {};
+    for (final item in _queue) {
+      existentesPorUrl.putIfAbsent(item.url, () => []).add(item);
+    }
+
     setState(() {
-      _queue = List.generate(
-        lines.length,
-        (i) => DownloadItem(index: i + 1, url: lines[i]),
-      );
+      _queue = List.generate(lines.length, (i) {
+        final url = lines[i];
+        final listaExistente = existentesPorUrl[url];
+        if (listaExistente != null && listaExistente.isNotEmpty) {
+          final antigo = listaExistente.removeAt(0);
+          return DownloadItem(
+            index: i + 1,
+            url: url,
+            status: antigo.status,
+            progress: antigo.progress,
+            savedFileName: antigo.savedFileName,
+            errorMessage: antigo.errorMessage,
+          );
+        }
+        return DownloadItem(index: i + 1, url: url);
+      });
     });
   }
 
@@ -111,117 +126,25 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
     }
     if (_queue.isEmpty) return;
 
-    final dir = Directory(_dirController.text.trim());
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-
     setState(() => _isRunning = true);
 
-    final itensParaBaixar = _queue.where((item) {
-      if (apenasErros) return item.status == DownloadStatus.error;
-      return item.status != DownloadStatus.completed;
-    }).toList();
-
-    int cursor = 0;
-
-    Future<void> worker() async {
-      while (cursor < itensParaBaixar.length && _isRunning) {
-        final item = itensParaBaixar[cursor++];
-        await _processarItem(item, dir.path);
+    try {
+      await _engine.executarFila(
+        queue: _queue,
+        outputPath: _dirController.text.trim(),
+        maxConcurrency: _maxConcurrency,
+        apenasErros: apenasErros,
+        onUpdate: (_) => _agendarAtualizacaoUI(),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isRunning = false);
       }
-    }
-
-    await Future.wait(
-      List.generate(_maxConcurrency, (_) => worker()),
-    );
-
-    if (mounted) {
-      setState(() => _isRunning = false);
     }
   }
 
-  Future<void> _processarItem(DownloadItem item, String outputPath) async {
-    setState(() {
-      item.status = DownloadStatus.downloading;
-      item.progress = 0.0;
-      item.errorMessage = null;
-    });
-
-    final uri = Uri.parse(item.url);
-    final referer = '${uri.scheme}://${uri.host}/';
-
-    for (int tentativa = 1; tentativa <= 3; tentativa++) {
-      try {
-        final response = await _dio.get<List<int>>(
-          item.url,
-          options: Options(
-            responseType: ResponseType.bytes,
-            headers: {
-              'User-Agent':
-                  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',
-              'Referer': referer,
-              'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-            },
-          ),
-          onReceiveProgress: (received, total) {
-            if (total != -1 && mounted) {
-              setState(() {
-                item.progress = received / total;
-              });
-            }
-          },
-        );
-
-        final bytes = Uint8List.fromList(response.data!);
-
-        final contentType = response.headers
-                .value('content-type')
-                ?.split(';')
-                .first
-                .trim()
-                .toLowerCase() ??
-            '';
-        String ext = _mimeToExt[contentType] ?? '';
-
-        String rawName =
-            uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'img';
-        if (rawName.contains('.')) {
-          final parts = rawName.split('.');
-          if (ext.isEmpty) ext = '.${parts.last}';
-          rawName = parts.sublist(0, parts.length - 1).join('_');
-        }
-        if (ext.isEmpty) ext = '.jpg';
-
-        final cleanName = rawName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '');
-        final safeName = cleanName.isEmpty ? 'img' : cleanName;
-        final fileName =
-            '${item.index.toString().padLeft(4, '0')}_$safeName$ext';
-
-        final file = File('$outputPath/$fileName');
-        await file.writeAsBytes(bytes);
-
-        if (mounted) {
-          setState(() {
-            item.savedFileName = fileName;
-            item.progress = 1.0;
-            item.status = DownloadStatus.completed;
-          });
-        }
-        return;
-      } catch (e) {
-        if (tentativa < 3) {
-          await Future.delayed(Duration(seconds: tentativa * 2));
-        } else {
-          if (mounted) {
-            setState(() {
-              item.status = DownloadStatus.error;
-              item.errorMessage = e.toString();
-            });
-          }
-        }
-      }
-    }
+  void _pararDownloads() {
+    _engine.cancelar();
   }
 
   @override
@@ -264,6 +187,7 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
                   Expanded(
                     child: TextField(
                       controller: _urlsController,
+                      enabled: !_isRunning,
                       maxLines: null,
                       expands: true,
                       textAlignVertical: TextAlignVertical.top,
@@ -283,6 +207,7 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
                       Expanded(
                         child: TextField(
                           controller: _dirController,
+                          enabled: !_isRunning,
                           decoration: const InputDecoration(
                             labelText: 'Pasta de Destino',
                             border: OutlineInputBorder(),
@@ -324,7 +249,7 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
                       Expanded(
                         child: FilledButton.icon(
                           onPressed: _isRunning
-                              ? () => setState(() => _isRunning = false)
+                              ? _pararDownloads
                               : () => _iniciarDownloads(),
                           icon: Icon(_isRunning ? Icons.stop : Icons.download),
                           label: Text(_isRunning ? 'Parar' : 'Baixar Tudo'),
