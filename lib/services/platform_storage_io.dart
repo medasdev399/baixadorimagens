@@ -59,14 +59,38 @@ class PlatformStorage {
     return false;
   }
 
-  static Future<void> saveImageBytes({
+  static final Set<String> _pendingFilePaths = {};
+
+  static Future<String> saveImageBytes({
     required String outputPath,
     required String fileName,
     required List<int> bytes,
   }) async {
     final sep = Platform.pathSeparator;
-    final file = File('$outputPath$sep$fileName');
-    await file.writeAsBytes(bytes);
+    final dotIndex = fileName.lastIndexOf('.');
+    final baseName =
+        dotIndex != -1 ? fileName.substring(0, dotIndex) : fileName;
+    final ext = dotIndex != -1 ? fileName.substring(dotIndex) : '';
+
+    String candidateName = fileName;
+    String fullPath = '$outputPath$sep$candidateName';
+    int counter = 1;
+
+    while (await File(fullPath).exists() ||
+        _pendingFilePaths.contains(fullPath)) {
+      candidateName = '${baseName}_$counter$ext';
+      fullPath = '$outputPath$sep$candidateName';
+      counter++;
+    }
+
+    _pendingFilePaths.add(fullPath);
+    try {
+      final file = File(fullPath);
+      await file.writeAsBytes(bytes, flush: true);
+      return candidateName;
+    } finally {
+      _pendingFilePaths.remove(fullPath);
+    }
   }
 
   static Future<String> exportLogFile({

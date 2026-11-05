@@ -112,6 +112,14 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
     }
   }
 
+  void _limparUrls() {
+    if (_isRunning) return;
+    _urlsController.clear();
+    setState(() {
+      _queue.clear();
+    });
+  }
+
   void _carregarFila() {
     final lines = _urlsController.text
         .split('\n')
@@ -236,7 +244,9 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
                     );
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('E-mail copiado para a área de transferência.'),
+                        content: Text(
+                          'E-mail copiado para a área de transferência.',
+                        ),
                       ),
                     );
                   },
@@ -257,8 +267,9 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final concluidos =
-        _queue.where((e) => e.status == DownloadStatus.completed).length;
+    final concluidos = _queue
+        .where((e) => e.status == DownloadStatus.completed)
+        .length;
     final erros = _queue.where((e) => e.status == DownloadStatus.error).length;
     final progressoGeral = _queue.isEmpty ? 0.0 : concluidos / _queue.length;
 
@@ -323,9 +334,27 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            'Lista de URLs (uma por linha):',
-            style: TextStyle(fontWeight: FontWeight.bold),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Lista de URLs (uma por linha):',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              TextButton.icon(
+                onPressed:
+                    _isRunning ||
+                        (_urlsController.text.trim().isEmpty && _queue.isEmpty)
+                    ? null
+                    : _limparUrls,
+                icon: const Icon(Icons.clear_all, size: 18),
+                label: const Text('Limpar'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Expanded(
@@ -335,10 +364,16 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
               maxLines: null,
               expands: true,
               textAlignVertical: TextAlignVertical.top,
-              decoration: const InputDecoration(
-                hintText:
-                    'https://site1.com/foto.jpg\nhttps://site2.com/imagem.png',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: 'Cole aqui as URLs das imagens\nhttps://site1.com/foto.jpg\nhttps://site2.com/imagem.png',
+                border: const OutlineInputBorder(),
+                suffixIcon: _urlsController.text.isNotEmpty && !_isRunning
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        tooltip: 'Limpar URLs',
+                        onPressed: _limparUrls,
+                      )
+                    : null,
               ),
               onChanged: (_) {
                 if (!_isRunning) _carregarFila();
@@ -375,7 +410,7 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
           const SizedBox(height: 12),
           Row(
             children: [
-              const Text('Downloads simultâneos:'),
+              Text('Paralelos: $_maxConcurrency'),
               Expanded(
                 child: Slider(
                   value: _maxConcurrency.toDouble(),
@@ -388,7 +423,6 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
                       : (val) => setState(() => _maxConcurrency = val.toInt()),
                 ),
               ),
-              Text('$_maxConcurrency'),
             ],
           ),
           const SizedBox(height: 12),
@@ -424,12 +458,10 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
         LinearProgressIndicator(value: progressoGeral, minHeight: 6),
         Expanded(
           child: _queue.isEmpty
-              ? const Center(
-                  child: Text('Cole as URLs para montar a fila.'),
-                )
+              ? const Center(child: Text('Lista de URLs'))
               : ListView.separated(
                   itemCount: _queue.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (context, index) {
                     final item = _queue[index];
                     return ListTile(
@@ -447,8 +479,8 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
                               maxLines: 1,
                             )
                           : item.status == DownloadStatus.downloading
-                              ? LinearProgressIndicator(value: item.progress)
-                              : null,
+                          ? LinearProgressIndicator(value: item.progress)
+                          : null,
                       trailing: Text('#${item.index}'),
                     );
                   },
@@ -511,11 +543,8 @@ class _LogViewerDialogState extends State<LogViewerDialog> {
         filtroNivel: _filtroNivel,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Log exportado em: $destino'),
-        ),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Log exportado em: $destino')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -615,7 +644,7 @@ class _LogViewerDialogState extends State<LogViewerDialog> {
                           )
                         : ListView.separated(
                             itemCount: filtradas.length,
-                            separatorBuilder: (_, __) =>
+                            separatorBuilder: (_, _) =>
                                 const Divider(height: 1),
                             itemBuilder: (context, index) {
                               // Exibe os mais recentes no topo

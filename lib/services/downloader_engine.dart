@@ -191,13 +191,13 @@ class DownloaderEngine {
         final fileName =
             '${item.index.toString().padLeft(4, '0')}_$safeName$ext';
 
-        await PlatformStorage.saveImageBytes(
+        final savedFileName = await PlatformStorage.saveImageBytes(
           outputPath: outputPath,
           fileName: fileName,
           bytes: bytes,
         );
 
-        item.savedFileName = fileName;
+        item.savedFileName = savedFileName;
         item.progress = 1.0;
         item.status = DownloadStatus.completed;
         onUpdate(item);
@@ -206,7 +206,7 @@ class DownloaderEngine {
         _logger.info(
           'Item #${item.index} baixado com sucesso',
           details:
-              'Arquivo: $fileName ($tamanhoKb KB) | Tipo: ${contentType.isEmpty ? "desconhecido" : contentType} | URL: ${item.url}',
+              'Arquivo: $savedFileName ($tamanhoKb KB) | Tipo: ${contentType.isEmpty ? "desconhecido" : contentType} | URL: ${item.url}',
         );
         return;
       } catch (e) {

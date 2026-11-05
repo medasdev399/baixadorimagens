@@ -13,7 +13,7 @@ void main() {
     await tester.pumpWidget(const BaixadorImagensApp());
 
     expect(find.text('Baixador de Imagens'), findsOneWidget);
-    expect(find.text('Cole as URLs para montar a fila.'), findsOneWidget);
+    expect(find.text('Lista de URLs'), findsOneWidget);
 
     final urlField = find.byType(TextField).first;
     await tester.enterText(
@@ -26,6 +26,16 @@ void main() {
     expect(find.text('https://site2.com/imagem.png'), findsWidgets);
     expect(find.text('#1'), findsOneWidget);
     expect(find.text('#2'), findsOneWidget);
+
+    // Testa o botão Limpar
+    final botaoLimpar = find.widgetWithText(TextButton, 'Limpar');
+    expect(botaoLimpar, findsOneWidget);
+    await tester.tap(botaoLimpar);
+    await tester.pump();
+
+    expect(find.text('#1'), findsNothing);
+    expect(find.text('#2'), findsNothing);
+    expect(find.text('Lista de URLs'), findsOneWidget);
 
     // Abre o visualizador de logs na AppBar
     await tester.tap(find.byIcon(Icons.receipt_long));

@@ -38,12 +38,13 @@ class PlatformStorage {
 
   static Future<bool> ensureDirectory(String outputPath) async => false;
 
-  static Future<void> saveImageBytes({
+  static Future<String> saveImageBytes({
     required String outputPath,
     required String fileName,
     required List<int> bytes,
   }) async {
     _triggerBrowserDownload(fileName, Uint8List.fromList(bytes));
+    return fileName;
   }
 
   static Future<String> exportLogFile({
