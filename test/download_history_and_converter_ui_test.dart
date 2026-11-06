@@ -4,6 +4,7 @@ import 'package:baixadorimagens/main.dart';
 import 'package:baixadorimagens/services/download_history_service.dart';
 import 'package:baixadorimagens/services/downloader_engine.dart';
 import 'package:baixadorimagens/services/image_converter_service.dart';
+import 'package:baixadorimagens/widgets/download_history_dialog.dart';
 
 void main() {
   testWidgets('Testa seletor de formato de imagem e abertura dos diálogos',
@@ -46,13 +47,10 @@ void main() {
     expect(find.text('https://exemplo.com/erro.png'), findsOneWidget);
     expect(find.text('Rebaixar Todos os Erros'), findsOneWidget);
 
-    // Clica em Rebaixar Todos os Erros
-    await tester.tap(find.text('Rebaixar Todos os Erros'));
+    // Fecha o Histórico
+    await tester.tap(find.byIcon(Icons.close));
     await tester.pumpAndSettle();
-
-    // Diálogo fecha e a URL com erro foi preenchida na caixa de URLs
     expect(find.text('Histórico de Links e Downloads'), findsNothing);
-    expect(find.textContaining('https://exemplo.com/erro.png'), findsWidgets);
 
     // Abre o Conversor de Imagens Dedicado através da AppBar
     await tester.tap(find.byIcon(Icons.transform));
@@ -66,5 +64,37 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Conversor de Imagens'), findsNothing);
   });
-}
 
+  testWidgets('Testa callback de re-tentativa no DownloadHistoryDialog',
+      (WidgetTester tester) async {
+    final history = DownloadHistoryService.instance;
+    await history.limpar();
+
+    await history.registrarOuAtualizar(
+      url: 'https://site.com/falha.jpg',
+      status: DownloadStatus.error,
+      errorMessage: 'Falha 404',
+    );
+
+    List<String> retried = [];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DownloadHistoryDialog(
+            onRetryUrls: (urls) {
+              retried = urls;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rebaixar Todos os Erros'), findsOneWidget);
+    await tester.tap(find.text('Rebaixar Todos os Erros'));
+    await tester.pump();
+
+    expect(retried, contains('https://site.com/falha.jpg'));
+  });
+}
