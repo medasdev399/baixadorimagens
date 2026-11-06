@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
 import 'app_logger.dart';
+import 'download_history_service.dart';
+import 'image_converter_service.dart';
 import 'platform_storage.dart';
 
 enum DownloadStatus { idle, downloading, completed, error }
@@ -67,6 +70,7 @@ class DownloaderEngine {
     required int maxConcurrency,
     required void Function(DownloadItem item) onUpdate,
     bool apenasErros = false,
+    ImageTargetFormat targetFormat = ImageTargetFormat.original,
   }) async {
     _isCancelled = false;
     _cancelToken = CancelToken();
@@ -92,13 +96,18 @@ class DownloaderEngine {
     _logger.info(
       'Iniciando fila de downloads',
       details:
-          'Pendentes: ${itensParaBaixar.length}/${queue.length} | Concorrência: $workerCount | Destino: $outputPath | Apenas erros: $apenasErros',
+          'Pendentes: ${itensParaBaixar.length}/${queue.length} | Concorrência: $workerCount | Formato: ${targetFormat.label} | Destino: $outputPath | Apenas erros: $apenasErros',
     );
 
     Future<void> worker() async {
       while (cursor < itensParaBaixar.length && !_isCancelled) {
         final item = itensParaBaixar[cursor++];
-        await _processarItem(item, outputPath, onUpdate);
+        await _processarItem(
+          item: item,
+          outputPath: outputPath,
+          targetFormat: targetFormat,
+          onUpdate: onUpdate,
+        );
       }
     }
 
@@ -116,11 +125,12 @@ class DownloaderEngine {
     );
   }
 
-  Future<void> _processarItem(
-    DownloadItem item,
-    String outputPath,
-    void Function(DownloadItem item) onUpdate,
-  ) async {
+  Future<void> _processarItem({
+    required DownloadItem item,
+    required String outputPath,
+    required ImageTargetFormat targetFormat,
+    required void Function(DownloadItem item) onUpdate,
+  }) async {
     if (_isCancelled) return;
 
     item.status = DownloadStatus.downloading;
@@ -188,13 +198,32 @@ class DownloaderEngine {
         if (safeName.length > 60) {
           safeName = safeName.substring(0, 60);
         }
-        final fileName =
+        var fileName =
             '${item.index.toString().padLeft(4, '0')}_$safeName$ext';
+
+        List<int> bytesParaSalvar = bytes;
+        if (!targetFormat.isOriginal) {
+          try {
+            bytesParaSalvar = await ImageConverterService.instance.convertImageBytes(
+              bytes: Uint8List.fromList(bytes),
+              targetFormat: targetFormat,
+            );
+            fileName = ImageConverterService.instance.adjustFileName(
+              fileName,
+              targetFormat,
+            );
+          } catch (convErr) {
+            _logger.warning(
+              'Falha ao converter item #${item.index} para ${targetFormat.label}, salvando no formato original',
+              details: '$convErr',
+            );
+          }
+        }
 
         final savedFileName = await PlatformStorage.saveImageBytes(
           outputPath: outputPath,
           fileName: fileName,
-          bytes: bytes,
+          bytes: bytesParaSalvar,
         );
 
         item.savedFileName = savedFileName;
@@ -202,11 +231,18 @@ class DownloaderEngine {
         item.status = DownloadStatus.completed;
         onUpdate(item);
 
-        final tamanhoKb = (bytes.length / 1024).toStringAsFixed(1);
+        await DownloadHistoryService.instance.registrarOuAtualizar(
+          url: item.url,
+          status: DownloadStatus.completed,
+          savedFileName: savedFileName,
+          targetFormat: targetFormat.name,
+        );
+
+        final tamanhoKb = (bytesParaSalvar.length / 1024).toStringAsFixed(1);
         _logger.info(
           'Item #${item.index} baixado com sucesso',
           details:
-              'Arquivo: $savedFileName ($tamanhoKb KB) | Tipo: ${contentType.isEmpty ? "desconhecido" : contentType} | URL: ${item.url}',
+              'Arquivo: $savedFileName ($tamanhoKb KB) | Formato: ${targetFormat.isOriginal ? (contentType.isEmpty ? "original" : contentType) : targetFormat.name.toUpperCase()} | URL: ${item.url}',
         );
         return;
       } catch (e) {
@@ -223,6 +259,12 @@ class DownloaderEngine {
           item.status = DownloadStatus.error;
           item.errorMessage = descricaoErro;
           onUpdate(item);
+          await DownloadHistoryService.instance.registrarOuAtualizar(
+            url: item.url,
+            status: DownloadStatus.error,
+            errorMessage: descricaoErro,
+            targetFormat: targetFormat.name,
+          );
           _logger.error(
             'Erro não recuperável no item #${item.index}',
             details: 'URL: ${item.url} | Motivo: $descricaoErro',
@@ -249,6 +291,12 @@ class DownloaderEngine {
           item.status = DownloadStatus.error;
           item.errorMessage = descricaoErro;
           onUpdate(item);
+          await DownloadHistoryService.instance.registrarOuAtualizar(
+            url: item.url,
+            status: DownloadStatus.error,
+            errorMessage: descricaoErro,
+            targetFormat: targetFormat.name,
+          );
           _logger.error(
             'Falha definitiva no item #${item.index} após 3 tentativas',
             details: 'URL: ${item.url} | Erro: $descricaoErro',

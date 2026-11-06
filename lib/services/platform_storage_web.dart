@@ -19,6 +19,12 @@ external void _revokeObjectURL(String url);
 @JS('document.createElement')
 external _JSAnchorElement _createElement(String tagName);
 
+@JS('localStorage.getItem')
+external String? _localStorageGet(String key);
+
+@JS('localStorage.setItem')
+external void _localStorageSet(String key, String value);
+
 extension type _JSAnchorElement._(JSObject _) implements JSObject {
   external set href(String value);
   external set download(String value);
@@ -72,5 +78,24 @@ class PlatformStorage {
   }
 
   static bool isUnrecoverableStorageError(Object error) => false;
+
+  static String? _memoryHistoryFallback;
+
+  static Future<String?> loadHistoryJson() async {
+    try {
+      return _localStorageGet('baixadorimagens_history') ?? _memoryHistoryFallback;
+    } catch (_) {
+      return _memoryHistoryFallback;
+    }
+  }
+
+  static Future<void> saveHistoryJson(String jsonString) async {
+    _memoryHistoryFallback = jsonString;
+    try {
+      _localStorageSet('baixadorimagens_history', jsonString);
+    } catch (_) {
+      // Ignora erro se localStorage estiver bloqueado
+    }
+  }
 }
 

@@ -6,14 +6,21 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import 'services/app_logger.dart';
+import 'services/download_history_service.dart';
 import 'services/downloader_engine.dart';
+import 'services/image_converter_service.dart';
 import 'services/platform_storage.dart';
+import 'widgets/download_history_dialog.dart';
+import 'widgets/image_converter_dialog.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final logger = AppLogger.instance;
   await logger.initFileLogging();
+
+  final history = DownloadHistoryService.instance;
+  await history.init();
 
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
@@ -76,6 +83,7 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
   bool _isRunning = false;
   bool _updateScheduled = false;
   int _maxConcurrency = 8;
+  ImageTargetFormat _targetFormat = ImageTargetFormat.original;
 
   @override
   void dispose() {
@@ -167,6 +175,7 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
         outputPath: _dirController.text.trim(),
         maxConcurrency: _maxConcurrency,
         apenasErros: apenasErros,
+        targetFormat: _targetFormat,
         onUpdate: (_) => _agendarAtualizacaoUI(),
       );
     } catch (e, stack) {
@@ -192,6 +201,44 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
       builder: (context) => LogViewerDialog(
         logger: _logger,
         outputDirectory: _dirController.text.trim(),
+      ),
+    );
+  }
+
+  void _abrirConversorImagens() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => ImageConverterDialog(
+        initialOutputDir: _dirController.text.trim(),
+      ),
+    );
+  }
+
+  void _rebaixarUrlsDoHistorico(List<String> urls) {
+    if (urls.isEmpty) return;
+    final setExistente = _urlsController.text
+        .split('\n')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+
+    for (final u in urls) {
+      setExistente.add(u);
+    }
+
+    setState(() {
+      _urlsController.text = setExistente.join('\n');
+    });
+
+    _carregarFila();
+    _iniciarDownloads(apenasErros: false);
+  }
+
+  void _abrirHistorico() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => DownloadHistoryDialog(
+        onRetryUrls: _rebaixarUrlsDoHistorico,
       ),
     );
   }
@@ -286,6 +333,27 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
+          ),
+          IconButton(
+            onPressed: _abrirConversorImagens,
+            icon: const Icon(Icons.transform),
+            tooltip: 'Conversor de Imagens Dedicado',
+          ),
+          ListenableBuilder(
+            listenable: DownloadHistoryService.instance,
+            builder: (context, _) {
+              final totalErros = DownloadHistoryService.instance.errorCount;
+              return Badge(
+                isLabelVisible: totalErros > 0,
+                label: Text('$totalErros'),
+                backgroundColor: Colors.redAccent,
+                child: IconButton(
+                  onPressed: _abrirHistorico,
+                  icon: const Icon(Icons.history),
+                  tooltip: 'Histórico de Links (Baixar novamente falhas)',
+                ),
+              );
+            },
           ),
           IconButton(
             onPressed: _abrirVisualizadorLogs,
@@ -407,6 +475,53 @@ class _DownloaderScreenState extends State<DownloaderScreen> {
               ],
             ],
           ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: const InputDecoration(
+              labelText: 'Tipo de Imagem para Download',
+              prefixIcon: Icon(Icons.image, color: Colors.tealAccent),
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<ImageTargetFormat>(
+                value: _targetFormat,
+                isDense: true,
+                isExpanded: true,
+                onChanged: _isRunning
+                    ? null
+                    : (novo) {
+                        if (novo != null) {
+                          setState(() => _targetFormat = novo);
+                        }
+                      },
+                items: ImageTargetFormat.values.map((f) {
+                  return DropdownMenuItem<ImageTargetFormat>(
+                    value: f,
+                    child: Text(
+                      f.label,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          if (!_targetFormat.isOriginal) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+              child: Text(
+                '↳ Conversão automática ativada: salvará em ${_targetFormat.name.toUpperCase()}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Colors.tealAccent,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           Row(
             children: [

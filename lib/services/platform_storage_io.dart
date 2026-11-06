@@ -110,5 +110,46 @@ class PlatformStorage {
 
   static bool isUnrecoverableStorageError(Object error) =>
       error is FileSystemException;
+
+  static String _getHistoryFilePath() {
+    final sep = Platform.pathSeparator;
+    final String basePath;
+    if (Platform.isWindows) {
+      final localAppData = Platform.environment['LOCALAPPDATA'] ??
+          Platform.environment['USERPROFILE'] ??
+          '.';
+      basePath = '$localAppData${sep}baixadorimagens';
+    } else {
+      final home = Platform.environment['HOME'] ?? '.';
+      basePath = '$home$sep.local${sep}share${sep}baixadorimagens';
+    }
+    return '$basePath${sep}download_history.json';
+  }
+
+  static Future<String?> loadHistoryJson() async {
+    try {
+      final file = File(_getHistoryFilePath());
+      if (await file.exists()) {
+        return await file.readAsString();
+      }
+    } catch (_) {
+      // Ignora erro de leitura inicial
+    }
+    return null;
+  }
+
+  static Future<void> saveHistoryJson(String jsonString) async {
+    try {
+      final filePath = _getHistoryFilePath();
+      final file = File(filePath);
+      final parentDir = file.parent;
+      if (!await parentDir.exists()) {
+        await parentDir.create(recursive: true);
+      }
+      await file.writeAsString(jsonString, flush: true);
+    } catch (_) {
+      // Ignora falha de salvamento secundária
+    }
+  }
 }
 

@@ -28,5 +28,9 @@ class PlatformStorage {
   }
 
   static bool isUnrecoverableStorageError(Object error) => false;
+
+  static Future<String?> loadHistoryJson() async => null;
+
+  static Future<void> saveHistoryJson(String jsonString) async {}
 }
 
